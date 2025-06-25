@@ -99,6 +99,21 @@ def main():
     nick = sys.argv[1]
     consumer = KafkaConsumer()
     producer = KafkaProducer()
+
+    print("Abonnements initiaux :", consumer.subscription())
+
+    # Abonnement au premier topic
+    consumer.subscribe(["chat_channel_general"])
+    print("Après abonnement à #general :", consumer.subscription())
+
+    # Abonnement à un deuxième topic (cela écrase le précédent)
+    consumer.subscribe(["chat_channel_general", "chat_channel_random"])
+    print("Après ajout de #random :", consumer.subscription())
+
+    # Désabonnement
+    consumer.unsubscribe()
+    print("Après unsubscribe :", consumer.subscription())
+
     th = threading.Thread(target=read_messages, args=(consumer,))
     th.start()
 
