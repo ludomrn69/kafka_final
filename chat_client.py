@@ -6,6 +6,29 @@ import threading
 from kafka import KafkaProducer, KafkaConsumer
 
 
+def subscriptions(consumer):
+    subs = consumer.subscription()
+    return list(subs) if subs is not None else []
+
+
+def add_subscription(consumer, topic):
+    topics = set(subscriptions(consumer))
+    topics.add(topic)
+    consumer.subscribe(list(topics))
+
+
+# Supprime un abonnement à un topic
+def del_subscription(consumer, topic):
+    topics = set(subscriptions(consumer))
+    if topic not in topics:
+        raise RuntimeError(f"Le topic {topic} n'est pas dans les abonnements.")
+    topics.remove(topic)
+    if topics:
+        consumer.subscribe(list(topics))
+    else:
+        consumer.unsubscribe()
+
+
 should_quit = False
 
 
@@ -100,19 +123,22 @@ def main():
     consumer = KafkaConsumer()
     producer = KafkaProducer()
 
-    print("Abonnements initiaux :", consumer.subscription())
 
-    # Abonnement au premier topic
-    consumer.subscribe(["chat_channel_general"])
-    print("Après abonnement à #general :", consumer.subscription())
-
-    # Abonnement à un deuxième topic (cela écrase le précédent)
+    print("== Test del_subscription() ==")
     consumer.subscribe(["chat_channel_general", "chat_channel_random"])
-    print("Après ajout de #random :", consumer.subscription())
+    print("Avant suppression :", subscriptions(consumer))
 
-    # Désabonnement
+    del_subscription(consumer, "chat_channel_random")
+    print("Après suppression de #random :", subscriptions(consumer))
+
+    try:
+        del_subscription(consumer, "chat_channel_inexistant")
+    except RuntimeError as e:
+        print("Exception attendue :", e)
+
     consumer.unsubscribe()
-    print("Après unsubscribe :", consumer.subscription())
+    print("Après unsubscribe :", subscriptions(consumer))
+    print("===================================")
 
     th = threading.Thread(target=read_messages, args=(consumer,))
     th.start()
