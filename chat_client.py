@@ -4,8 +4,23 @@ import sys
 import threading
 import re
 import json
+import io
+from fastavro import writer, reader, parse_schema
 
 from kafka import KafkaProducer, KafkaConsumer
+with open("msg.avsc", "r") as f:
+    avro_schema = parse_schema(json.load(f))
+
+
+def avro_encode(data):
+    buffer = io.BytesIO()
+    writer(buffer, avro_schema, [data])
+    return buffer.getvalue()
+
+
+def avro_decode(bytes_data):
+    buffer = io.BytesIO(bytes_data)
+    return list(reader(buffer, avro_schema))[0]
 
 
 def subscriptions(consumer):
@@ -44,7 +59,7 @@ def read_messages(consumer):
         for channel, messages in received.items():
             for msg in messages:
                 try:
-                    data = json.loads(msg.value.decode())
+                    data = avro_decode(msg.value)
                     print(f"{data['nick']}: {data['msg']}")
                 except Exception:
                     print("< %s: %s" % (channel.topic, msg.value))
@@ -66,11 +81,25 @@ def cmd_msg(producer, channel, line, nick, consumer):
     if not line:
         return
 
-    payload = json.dumps({"nick": nick, "msg": line})
+    payload = {"nick": nick, "msg": line}
     try:
-        producer.send(topic, payload.encode())
+        producer.send(topic, avro_encode(payload))
+        producer.send("chat_all", avro_encode(payload))
     except Exception as e:
         print("Erreur lors de l'envoi du message :", e)
+
+
+# Commande pour changer le canal actif
+def cmd_active(consumer, line, joined_chans):
+    if not line or not is_valid_channel(line):
+        print("Nom de canal invalide. Ex : #general")
+        return None
+
+    if line not in joined_chans:
+        print("Vous n’avez pas rejoint ce canal.")
+        return None
+
+    return line
 
 
 def is_valid_channel(chan):
@@ -114,9 +143,16 @@ def cmd_part(consumer, producer, line, nick):
 
 
 
-def cmd_quit(producer, line):
-    # TODO À compléter
-    pass
+def cmd_quit(producer, joined_chans, nick):
+    for chan in joined_chans:
+        if not is_valid_channel(chan):
+            continue
+        topic = "chat_channel_" + chan[1:]
+        try:
+            payload = {"nick": nick, "msg": f"{nick} has left {chan}"}
+            producer.send(topic, avro_encode(payload))
+        except Exception as e:
+            print(f"Erreur lors de l'envoi du message de départ sur {chan}: {e}")
 
 
 
@@ -159,9 +195,13 @@ def main_loop(nick, consumer, producer):
                     curchan = joined_chans[-1] if joined_chans else None
 
         elif cmd == "quit":
-            cmd_quit(producer, args)
+            cmd_quit(producer, joined_chans, nick)
             break
         # TODO: rajouter des commandes ici
+        elif cmd == "active":
+            newchan = cmd_active(consumer, args, joined_chans)
+            if newchan:
+                curchan = newchan
 
 
 

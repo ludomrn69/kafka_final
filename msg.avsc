@@ -1,0 +1,8 @@
+{
+  "type": "record",
+  "name": "ChatMessage",
+  "fields": [
+    {"name": "nick", "type": "string"},
+    {"name": "msg", "type": "string"}
+  ]
+}
