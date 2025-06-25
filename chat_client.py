@@ -2,6 +2,8 @@
 
 import sys
 import threading
+import re
+import json
 
 from kafka import KafkaProducer, KafkaConsumer
 
@@ -41,25 +43,74 @@ def read_messages(consumer):
 
         for channel, messages in received.items():
             for msg in messages:
-                print("< %s: %s" % (channel.topic, msg.value))
+                try:
+                    data = json.loads(msg.value.decode())
+                    print(f"{data['nick']}: {data['msg']}")
+                except Exception:
+                    print("< %s: %s" % (channel.topic, msg.value))
 
 
 
-def cmd_msg(producer, channel, line):
-    # TODO À compléter
-    pass
+def cmd_msg(producer, channel, line, nick, consumer):
+    if channel is None:
+        print("Aucun canal actif. Utilisez /join pour en rejoindre un.")
+        return
+
+    topic = "chat_channel_" + channel[1:]
+
+    # Vérifie si le canal est réellement rejoint
+    if topic not in subscriptions(consumer):
+        print("Vous n’êtes pas abonné à ce canal.")
+        return
+
+    if not line:
+        return
+
+    payload = json.dumps({"nick": nick, "msg": line})
+    try:
+        producer.send(topic, payload.encode())
+    except Exception as e:
+        print("Erreur lors de l'envoi du message :", e)
 
 
-
-def cmd_join(consumer, producer, line):
-    # TODO À compléter
-    pass
+def is_valid_channel(chan):
+    return re.match(r"^#[a-zA-Z0-9-]+$", chan)
 
 
+def cmd_join(consumer, producer, line, nick):
+    if not line or not is_valid_channel(line):
+        print("Nom de canal invalide. Ex: #general")
+        return False
 
-def cmd_part(consumer, producer, line):
-    # TODO À compléter
-    pass
+    topic = "chat_channel_" + line[1:]
+    try:
+        add_subscription(consumer, topic)
+        message = f"{nick} has joined"
+        producer.send(topic, message.encode())
+        return True
+    except Exception as e:
+        print("Erreur lors du join :", e)
+        return False
+
+
+def cmd_part(consumer, producer, line, nick):
+    if not line or not is_valid_channel(line):
+        print("Nom de canal invalide. Ex : #general")
+        return False
+
+    topic = "chat_channel_" + line[1:]
+
+    if topic not in subscriptions(consumer):
+        print("Vous n’êtes pas sur ce canal.")
+        return False
+
+    try:
+        del_subscription(consumer, topic)
+        producer.send(topic, f"{nick} has left".encode())
+        return True
+    except Exception as e:
+        print("Erreur lors du part :", e)
+        return False
 
 
 
@@ -92,20 +143,20 @@ def main_loop(nick, consumer, producer):
             args = line
 
         if cmd == "msg":
-            cmd_msg(producer, curchan, args)
+            cmd_msg(producer, curchan, args, nick, consumer)
         elif cmd == "join":
-            success = cmd_join(consumer, producer, args)
+            success = cmd_join(consumer, producer, args, nick)
             if success:
-                # TODO: Ajouter le canal à joined_chans
-                # TODO: curchan est maintenant le nouveau channel
-                pass
+                joined_chans.append(args)
+                curchan = args
 
         elif cmd == "part":
-            success = cmd_part(consumer, producer, args)
+            success = cmd_part(consumer, producer, args, nick)
             if success:
-                # TODO: Enlever le canal de joined_chans
-                # TODO: Changer curchan si c'était le curchan
-                pass
+                if args in joined_chans:
+                    joined_chans.remove(args)
+                if curchan == args:
+                    curchan = joined_chans[-1] if joined_chans else None
 
         elif cmd == "quit":
             cmd_quit(producer, args)
@@ -122,23 +173,6 @@ def main():
     nick = sys.argv[1]
     consumer = KafkaConsumer()
     producer = KafkaProducer()
-
-
-    print("== Test del_subscription() ==")
-    consumer.subscribe(["chat_channel_general", "chat_channel_random"])
-    print("Avant suppression :", subscriptions(consumer))
-
-    del_subscription(consumer, "chat_channel_random")
-    print("Après suppression de #random :", subscriptions(consumer))
-
-    try:
-        del_subscription(consumer, "chat_channel_inexistant")
-    except RuntimeError as e:
-        print("Exception attendue :", e)
-
-    consumer.unsubscribe()
-    print("Après unsubscribe :", subscriptions(consumer))
-    print("===================================")
 
     th = threading.Thread(target=read_messages, args=(consumer,))
     th.start()
