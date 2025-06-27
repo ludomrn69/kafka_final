@@ -49,7 +49,7 @@ def del_subscription(consumer, topic):
 should_quit = False
 
 
-def read_messages(consumer):
+def read_messages(consumer, banned_users):
     # TODO À compléter
     while not should_quit:
         # On utilise poll pour ne pas bloquer indéfiniment quand should_quit
@@ -60,6 +60,8 @@ def read_messages(consumer):
             for msg in messages:
                 try:
                     data = avro_decode(msg.value)
+                    if data["nick"] in banned_users:
+                        continue
                     print(f"{data['nick']}: {data['msg']}")
                 except Exception:
                     print("< %s: %s" % (channel.topic, msg.value))
@@ -212,10 +214,30 @@ def main():
 
     nick = sys.argv[1]
     consumer = KafkaConsumer()
+    ban_consumer = KafkaConsumer(
+        "chat_bans",
+        bootstrap_servers="localhost:9092",
+        auto_offset_reset="earliest",
+        enable_auto_commit=True,
+        group_id="ban-tracker"
+    )
     producer = KafkaProducer()
 
-    th = threading.Thread(target=read_messages, args=(consumer,))
+    banned_users = set()
+
+    th = threading.Thread(target=read_messages, args=(consumer, banned_users))
     th.start()
+
+    # Thread lecture bannis
+    def track_bans():
+        for msg in ban_consumer:
+            try:
+                data = json.loads(msg.value.decode())
+                banned_users.add(data["nick"])
+            except Exception as e:
+                print("Erreur lecture ban:", e)
+
+    threading.Thread(target=track_bans, daemon=True).start()
 
     try:
         main_loop(nick, consumer, producer)

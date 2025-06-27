@@ -54,4 +54,25 @@ query = windowed_counts.writeStream \
     .option("truncate", False) \
     .start()
 
+# Ban message formatting and sending to Kafka
+from pyspark.sql.functions import to_json, struct, lit
+
+# Create a new DataFrame with nick and a ban reason message
+ban_messages = windowed_counts.select(
+    to_json(struct(
+        col("nick"),
+        lit("Flood detected: too many messages in short time").alias("reason")
+    )).alias("value")
+)
+
+# Write ban messages to Kafka topic 'chat_bans'
+ban_query = ban_messages.writeStream \
+    .format("kafka") \
+    .option("kafka.bootstrap.servers", "localhost:9092") \
+    .option("topic", "chat_bans") \
+    .option("checkpointLocation", "/tmp/chat_bans_checkpoint") \
+    .outputMode("update") \
+    .start()
+
 query.awaitTermination()
+ban_query.awaitTermination()
