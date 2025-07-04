@@ -61,7 +61,7 @@ def read_messages(consumer, banned_users):
                 try:
                     data = avro_decode(msg.value)
                     if data["nick"] in banned_users:
-                        continue
+                        continue  # on ignore sans afficher
                     print(f"{data['nick']}: {data['msg']}")
                 except Exception:
                     print("< %s: %s" % (channel.topic, msg.value))
@@ -224,18 +224,25 @@ def main():
     producer = KafkaProducer()
 
     banned_users = set()
+    bannis_annonces = set()
 
     th = threading.Thread(target=read_messages, args=(consumer, banned_users))
     th.start()
 
     # Thread lecture bannis
     def track_bans():
-        for msg in ban_consumer:
-            try:
-                data = json.loads(msg.value.decode())
-                banned_users.add(data["nick"])
-            except Exception as e:
-                print("Erreur lecture ban:", e)
+        while not should_quit:
+            received = ban_consumer.poll(100)
+            for _, messages in received.items():
+                for msg in messages:
+                    try:
+                        data = json.loads(msg.value.decode())
+                        banned_users.add(data["nick"])
+                        if data["nick"] not in bannis_annonces:
+                            print(f"[INFO] Banni détecté : {data['nick']}")
+                            bannis_annonces.add(data["nick"])
+                    except Exception as e:
+                        print("Erreur lecture ban:", e)
 
     threading.Thread(target=track_bans, daemon=True).start()
 
