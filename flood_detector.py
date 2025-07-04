@@ -27,7 +27,19 @@ def decode_avro(avro_bytes):
 
 decode_udf = udf(decode_avro, StringType())
 
-# Read messages from Kafka
+from pyspark.sql.functions import expr
+
+# Decode nick and message
+def decode_avro_msg(avro_bytes):
+    try:
+        buffer = io.BytesIO(avro_bytes)
+        records = list(reader(buffer, avro_schema))
+        return records[0]["msg"]
+    except Exception:
+        return None
+
+decode_msg_udf = udf(decode_avro_msg, StringType())
+
 df_raw = spark.readStream \
     .format("kafka") \
     .option("kafka.bootstrap.servers", "localhost:9092") \
@@ -35,17 +47,17 @@ df_raw = spark.readStream \
     .option("startingOffsets", "earliest") \
     .load()
 
-# Use UDF to decode Avro and extract nick
 df_parsed = df_raw \
     .withColumn("nick", decode_udf(col("value"))) \
-    .select("nick", "timestamp")
+    .withColumn("msg", decode_msg_udf(col("value"))) \
+    .withColumn("key", expr("concat(nick, ':', msg)")) \
+    .select("nick", "msg", "key", "timestamp")
 
-# Count messages per user in 5-second windows
 windowed_counts = df_parsed \
-    .groupBy(window(col("timestamp"), "5 seconds"), col("nick")) \
+    .groupBy(window(col("timestamp"), "60 seconds"), col("key"), col("nick"), col("msg")) \
     .count() \
-    .filter("count > 7") \
-    .select(col("nick"), col("count"))
+    .filter("count >= 10") \
+    .select(col("nick"), col("msg"), col("count"))
 
 # Output to console for debug (you can later send to Kafka)
 query = windowed_counts.writeStream \
@@ -61,7 +73,7 @@ from pyspark.sql.functions import to_json, struct, lit
 ban_messages = windowed_counts.select(
     to_json(struct(
         col("nick"),
-        lit("Flood detected: too many messages in short time").alias("reason")
+        lit("Spam detected: repeated identical messages").alias("reason")
     )).alias("value")
 )
 

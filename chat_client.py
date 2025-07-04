@@ -204,6 +204,8 @@ def main_loop(nick, consumer, producer):
             newchan = cmd_active(consumer, args, joined_chans)
             if newchan:
                 curchan = newchan
+        elif cmd == "list":
+            print("Canaux rejoints :", joined_chans)
 
 
 
