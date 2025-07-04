@@ -68,14 +68,17 @@ def read_messages(consumer, banned_users):
 
 
 
-def cmd_msg(producer, channel, line, nick, consumer):
+def cmd_msg(producer, channel, line, nick, consumer, banned_users):
+    if banned_users and nick in banned_users:
+        print("Impossible d'envoyer un message car vous êtes banni.")
+        return
+
     if channel is None:
         print("Aucun canal actif. Utilisez /join pour en rejoindre un.")
         return
 
     topic = "chat_channel_" + channel[1:]
 
-    # Vérifie si le canal est réellement rejoint
     if topic not in subscriptions(consumer):
         print("Vous n’êtes pas abonné à ce canal.")
         return
@@ -157,11 +160,14 @@ def cmd_quit(producer, joined_chans, nick):
             print(f"Erreur lors de l'envoi du message de départ sur {chan}: {e}")
 
 
+ 
+banned_users = set()
 
 def main_loop(nick, consumer, producer):
     joined_chans = []
     curchan = None
 
+    global banned_users
     while True:
         try:
             if curchan is None:
@@ -181,7 +187,7 @@ def main_loop(nick, consumer, producer):
             args = line
 
         if cmd == "msg":
-            cmd_msg(producer, curchan, args, nick, consumer)
+            cmd_msg(producer, curchan, args, nick, consumer, banned_users)
         elif cmd == "join":
             success = cmd_join(consumer, producer, args, nick)
             if success:
@@ -225,7 +231,7 @@ def main():
     )
     producer = KafkaProducer()
 
-    banned_users = set()
+    # banned_users is already defined globally and updated by track_bans
     bannis_annonces = set()
 
     th = threading.Thread(target=read_messages, args=(consumer, banned_users))
